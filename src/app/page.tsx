@@ -1,103 +1,200 @@
-import Image from "next/image";
+// src/app/page.tsx
+"use client";
+
+import { useState } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, addDoc, doc, getDoc, updateDoc, arrayUnion, query, where, getDocs } from "firebase/firestore";
+import { nanoid } from "nanoid";
+import { useRouter } from "next/navigation";
+
+// Firebase configuration - you'll need to replace these with your actual Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyCTr8rxHD7PRq81swlhCKfFGPaQ6KeJ8xo",
+  authDomain: "tambola-52a2e.firebaseapp.com",
+  projectId: "tambola-52a2e",
+  storageBucket: "tambola-52a2e.firebasestorage.app",
+  messagingSenderId: "105693415908",
+  appId: "1:105693415908:web:65d861800d3b7d24209ff1"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const router = useRouter();
+  const [playerName, setPlayerName] = useState("");
+  const [gameCode, setGameCode] = useState("");
+  const [selectedOption, setSelectedOption] = useState<"join" | "create">("join");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleCreateGame = async () => {
+    if (!playerName.trim()) {
+      setError("Please enter your name");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      // Generate a unique game code
+      const newGameCode = nanoid(6).toUpperCase();
+      
+      // Create a new game document in Firebase
+      await addDoc(collection(db, "games"), {
+        id: newGameCode,
+        players: [playerName],
+        markedNumbers: [],
+        started: false,
+        gameConfig: {
+          firstLine: 1,
+          secondLine: 1,
+          thirdLine: 1,
+          earlyFive: 1,
+          fullHouse: 1
+        }
+      });
+
+      // Store player name in localStorage
+      localStorage.setItem("playerName", playerName);
+
+      // Redirect to the game waiting page
+      router.push(`/game/${newGameCode}`);
+    } catch (error) {
+      console.error("Error creating game:", error);
+      setError("Failed to create game. Please try again.");
+      setLoading(false);
+    }
+  };
+
+  const handleJoinGame = async () => {
+    if (!playerName.trim()) {
+      setError("Please enter your name");
+      return;
+    }
+
+    if (!gameCode.trim()) {
+      setError("Please enter a game code");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      // Check if the game exists by querying for the game code
+      const gamesRef = collection(db, "games");
+      const q = query(gamesRef, where("id", "==", gameCode));
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        setError("Game not found. Please check the code and try again.");
+        setLoading(false);
+        return;
+      }
+
+      // Check if game has already started
+      const gameData = querySnapshot.docs[0].data();
+      if (gameData.started) {
+        setError("This game has already started. You cannot join.");
+        setLoading(false);
+        return;
+      }
+
+      // Get the document ID (not the game ID we created)
+      const gameDocId = querySnapshot.docs[0].id;
+      
+      // Add player to the game using arrayUnion to prevent duplicates
+      const gameDocRef = doc(db, "games", gameDocId);
+      await updateDoc(gameDocRef, {
+        players: arrayUnion(playerName)
+      });
+
+      // Store player name in localStorage
+      localStorage.setItem("playerName", playerName);
+
+      // Redirect to the game waiting page
+      router.push(`/game/${gameCode}`);
+    } catch (error) {
+      console.error("Error joining game:", error);
+      setError("Failed to join game. Please try again.");
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen flex items-center justify-center bg-gradient-to-r from-purple-500 to-indigo-600 p-4">
+      <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
+        <h1 className="text-3xl font-bold text-center mb-6">Tambola Game</h1>
+        
+        <div className="mb-6">
+          <label htmlFor="playerName" className="block text-sm font-medium text-gray-700 mb-1">
+            Your Name
+          </label>
+          <input
+            type="text"
+            id="playerName"
+            value={playerName}
+            onChange={(e) => setPlayerName(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Enter your name"
+          />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+
+        <div className="flex gap-4 mb-6">
+          <button
+            className={`flex-1 py-2 px-4 rounded-md ${
+              selectedOption === "join"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700"
+            }`}
+            onClick={() => setSelectedOption("join")}
+          >
+            Join Game
+          </button>
+          <button
+            className={`flex-1 py-2 px-4 rounded-md ${
+              selectedOption === "create"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700"
+            }`}
+            onClick={() => setSelectedOption("create")}
+          >
+            Create Game
+          </button>
+        </div>
+
+        {selectedOption === "join" && (
+          <div className="mb-6">
+            <label htmlFor="gameCode" className="block text-sm font-medium text-gray-700 mb-1">
+              Game Code
+            </label>
+            <input
+              type="text"
+              id="gameCode"
+              value={gameCode}
+              onChange={(e) => setGameCode(e.target.value.toUpperCase())}
+              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Enter game code"
+            />
+          </div>
+        )}
+
+        {error && <p className="text-red-500 mb-4 text-sm">{error}</p>}
+
+        <button
+          onClick={selectedOption === "join" ? handleJoinGame : handleCreateGame}
+          disabled={loading}
+          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-4 rounded-md transition duration-300 flex items-center justify-center"
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+          {loading ? (
+            <span className="animate-spin mr-2">⟳</span>
+          ) : null}
+          {selectedOption === "join" ? "Join Game" : "Create Game"}
+        </button>
+      </div>
+    </main>
   );
 }
